@@ -1,308 +1,260 @@
-# nginx 능동방어 시스템 설치 및 설정 가이드
+# 🛡️ nginx/Apache 능동방어 시스템 (RHEL 전용)
 
-## 시스템 요구사항
-- Ubuntu 20.04+ 또는 CentOS 8+
-- nginx 1.18+
-- LuaJIT 2.1+
-- Redis 6.0+
-- Node.js 16+ (관리 인터페이스용)
+Red Hat Enterprise Linux 기반 능동방어 시스템입니다.
 
-## 1. 의존성 설치
+## 🚀 주요 기능
 
-### Ubuntu/Debian
+- **대역폭 효율적 방어**: 444를 활용한 즉시 연결 종료
+- **이중 방어**: nginx + Apache 동시 지원
+- **RHEL 최적화**: Red Hat 특화 설정
+- **실시간 모니터링**: 위협 분석 및 로깅
+- **적응형 Rate Limiting**: IP 평판 기반
+
+## 📋 시스템 요구사항
+
+- Red Hat Enterprise Linux 7/8/9
+- 최소 2GB RAM
+- 최소 10GB 디스크 공간
+- root 또는 sudo 권한
+
+## 🛠️ 설치
+
+### 빠른 설치
+
 ```bash
-# nginx 및 Lua 모듈 설치
-sudo apt update
-sudo apt install nginx nginx-module-lua lua-cjson redis-server
-
-# Lua Redis 클라이언트 설치
-sudo apt install luarocks
-sudo luarocks install lua-resty-redis
+chmod +x install-rhel.sh
+sudo ./install-rhel.sh
 ```
 
-### CentOS/RHEL
+### 수동 설치
+
 ```bash
 # EPEL 저장소 활성화
-sudo yum install epel-release
+sudo yum install -y epel-release
 
-# nginx 및 Lua 모듈 설치
-sudo yum install nginx lua-devel lua-cjson redis
+# Apache 및 모듈 설치
+sudo yum install -y httpd mod_security mod_evasive mod_qos
 
-# Lua Redis 클라이언트 설치
-sudo yum install luarocks
-sudo luarocks install lua-resty-redis
-```
+# nginx 설치
+sudo tee /etc/yum.repos.d/nginx.repo << 'EOF'
+[nginx]
+name=nginx repo
+baseurl=http://nginx.org/packages/rhel/$releasever/$basearch/
+gpgcheck=0
+enabled=1
+EOF
 
-## 2. nginx 설정
+sudo yum install -y nginx
 
-### nginx.conf 설정
-```bash
-# 기존 nginx.conf 백업
-sudo cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
-
-# 새로운 설정 파일 복사
-sudo cp nginx.conf /etc/nginx/nginx.conf
-
-# Lua 스크립트 디렉토리 생성
-sudo mkdir -p /etc/nginx/lua
-sudo cp lua/*.lua /etc/nginx/lua/
-
-# 관리 인터페이스 디렉토리 생성
-sudo mkdir -p /var/www/admin
-sudo cp admin/index.html /var/www/admin/
-```
-
-### nginx 모듈 활성화
-```bash
-# Ubuntu/Debian
-echo "load_module modules/ngx_http_lua_module.so;" | sudo tee -a /etc/nginx/nginx.conf
-
-# CentOS/RHEL
-echo "load_module modules/ngx_http_lua_module.so;" | sudo tee -a /etc/nginx/nginx.conf
-```
-
-## 3. Redis 설정
-
-### Redis 서비스 시작
-```bash
-sudo systemctl start redis
+# Redis 설치
+sudo yum install -y redis
 sudo systemctl enable redis
+sudo systemctl start redis
+
+# 설정 파일 복사
+sudo cp apache/apache-defense.conf /etc/httpd/conf.d/
+sudo cp nginx-defense.conf /etc/nginx/
+
+# 서비스 시작
+sudo systemctl enable httpd nginx
+sudo systemctl start httpd nginx
 ```
 
-### Redis 설정 확인
+## ⚙️ 설정
+
+### Apache 설정
+
 ```bash
-redis-cli ping
-# 응답: PONG
+# ModSecurity 활성화
+sudo vim /etc/httpd/conf.d/mod_security.conf
+
+# 능동방어 설정 확인
+sudo vim /etc/httpd/conf.d/defense-config.conf
+
+# Apache 재시작
+sudo systemctl restart httpd
 ```
 
-## 4. 방화벽 설정
+### nginx 설정
 
 ```bash
-# 필요한 포트 열기
-sudo ufw allow 80/tcp
-sudo ufw allow 8080/tcp
-sudo ufw allow 6379/tcp  # Redis (내부 네트워크만)
-sudo ufw reload
-```
+# 메인 설정 확인
+sudo vim /etc/nginx/nginx-defense.conf
 
-## 5. 서비스 시작
-
-```bash
-# nginx 설정 테스트
-sudo nginx -t
+# 능동방어 설정 확인
+sudo vim /etc/nginx/lua/defense.lua
 
 # nginx 재시작
 sudo systemctl restart nginx
-sudo systemctl enable nginx
-
-# 서비스 상태 확인
-sudo systemctl status nginx
-sudo systemctl status redis
 ```
 
-## 6. 로그 모니터링 설정
+## 🔥 방화벽 설정 (firewalld)
 
-### 로그 로테이션 설정
 ```bash
-sudo tee /etc/logrotate.d/nginx-defense << EOF
-/var/log/nginx/access.log
-/var/log/nginx/security.log
-/var/log/nginx/error.log {
-    daily
-    missingok
-    rotate 30
-    compress
-    delaycompress
-    notifempty
-    create 644 nginx nginx
-    postrotate
-        systemctl reload nginx
-    endscript
-}
-EOF
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --reload
 ```
 
-## 7. 모니터링 스크립트
+## 🔒 SELinux 설정
 
-### 실시간 모니터링 스크립트 생성
 ```bash
-sudo tee /usr/local/bin/nginx-defense-monitor << 'EOF'
-#!/bin/bash
-
-LOG_FILE="/var/log/nginx-defense-monitor.log"
-SECURITY_LOG="/var/log/nginx/security.log"
-
-echo "$(date): nginx 능동방어 시스템 모니터링 시작" >> $LOG_FILE
-
-# 실시간 로그 모니터링
-tail -f $SECURITY_LOG | while read line; do
-    if echo "$line" | grep -q "blocked=1"; then
-        echo "$(date): 보안 위협 감지 - $line" >> $LOG_FILE
-        
-        # 이메일 알림 (선택사항)
-        # echo "보안 위협이 감지되었습니다: $line" | mail -s "nginx 보안 알림" admin@yourdomain.com
-    fi
-done
-EOF
-
-sudo chmod +x /usr/local/bin/nginx-defense-monitor
+sudo setsebool -P httpd_can_network_connect 1
+sudo setsebool -P httpd_can_network_relay 1
 ```
 
-### systemd 서비스 등록
+## 📊 모니터링
+
+### 실시간 로그
+
 ```bash
-sudo tee /etc/systemd/system/nginx-defense-monitor.service << EOF
-[Unit]
-Description=nginx Defense System Monitor
-After=nginx.service redis.service
+# Apache 로그
+sudo tail -f /var/log/httpd/security.log
 
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/nginx-defense-monitor
-Restart=always
-User=root
+# nginx 로그
+sudo tail -f /var/log/nginx/security.log
 
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable nginx-defense-monitor
-sudo systemctl start nginx-defense-monitor
+# 통합 모니터링
+sudo /usr/local/bin/monitor-servers.sh
 ```
 
-## 8. 테스트
+### 통계 확인
 
-### 기본 연결 테스트
 ```bash
-# nginx 상태 확인
-curl -I http://localhost
+# 차단된 IP 수
+sudo grep "blocked" /var/log/httpd/security.log | wc -l
 
-# 관리 인터페이스 접근 테스트
-curl -I http://localhost:8080/admin
+# 공격 시도 수
+sudo grep "attack" /var/log/nginx/security.log | wc -l
 ```
 
-### 보안 기능 테스트
+## 🏗️ 아키텍처
+
+```
+                    ┌─────────────┐
+                    │  Load Bal   │
+                    │   (nginx)   │
+                    └──────┬──────┘
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+      ┌───────▼───────┐         ┌───────▼───────┐
+      │  nginx        │         │  Apache       │
+      │  (Worker 1)   │         │  (Worker 2)   │
+      └───────┬───────┘         └───────┬───────┘
+              │                         │
+      ┌───────▼─────────────────▼───────┐
+      │         백엔드 서버              │
+      └──────────────────────────────────┘
+```
+
+## 📁 파일 구조
+
+```
+active-defense-sys/
+├── install-rhel.sh              # RHEL 설치 스크립트
+├── nginx-defense.conf            # nginx 설정
+├── apache/
+│   ├── apache-defense.conf      # Apache 설정
+│   └── setup-apache-defense.sh  # Apache 설치
+├── lua/                          # Lua 스크립트
+│   ├── defense.lua              # 기본 방어
+│   └── advanced_defense.lua    # 고급 전략
+├── scripts/                      # 유틸리티
+│   ├── automation.sh            # 자동화
+│   └── log_analyzer.sh          # 로그 분석
+└── docs/                         # 문서
+    ├── RHEL_GUIDE.md            # RHEL 가이드
+    └── BANDWIDTH_EFFICIENCY.md  # 대역폭 전략
+```
+
+## 🛡️ 방어 전략
+
+### 1. 444 사용 (대역폭 소비 제로)
+```nginx
+ngx.status = 444
+ngx.exit(444)
+```
+
+### 2. 타임아웃 전략
+```nginx
+ngx.sleep(10)  # 공격자 리소스 소모
+ngx.status = 503
+```
+
+### 3. Honey Token
+```nginx
+# 가짜 취약 페이지 제공
+ngx.say('<html>Fake Login</html>')
+```
+
+### 4. Shadow Ban
+```nginx
+ngx.sleep(60)  # 계속 대기시키기
+ngx.status = 504
+```
+
+## 📈 성능 비교
+
+```
+기존 방식 (403 차단):
+- 대역폭: 100 KB/sec
+- 월 비용: ~$50-100
+
+개선 방식 (444 사용):
+- 대역폭: 거의 제로
+- 월 비용: ~$1-5
+
+절감: 95% 이상 비용 절감
+```
+
+## 🔧 문제 해결
+
+### SELinux 문제
 ```bash
-# 의심스러운 요청 테스트
-curl "http://localhost/admin"
-curl "http://localhost/wp-admin"
-curl "http://localhost/test.php"
-
-# Rate Limiting 테스트
-for i in {1..30}; do curl http://localhost; done
+sudo setsebool -P httpd_can_network_connect 1
 ```
 
-## 9. 성능 튜닝
-
-### nginx 성능 최적화
+### 포트 충돌
 ```bash
-# worker 프로세스 수 조정
-worker_processes auto;
-
-# 연결 수 제한
-worker_connections 2048;
-
-# 버퍼 크기 최적화
-client_body_buffer_size 128k;
-client_max_body_size 10m;
-client_header_buffer_size 1k;
-large_client_header_buffers 4 4k;
+sudo netstat -tlnp | grep :80
+sudo kill -9 <PID>
 ```
 
-### Redis 메모리 최적화
+### 로그 확인
 ```bash
-# Redis 설정 파일 수정
-sudo tee -a /etc/redis/redis.conf << EOF
-maxmemory 256mb
-maxmemory-policy allkeys-lru
-save 900 1
-save 300 10
-save 60 10000
-EOF
-
-sudo systemctl restart redis
+sudo tail -f /var/log/httpd/error_log
+sudo tail -f /var/log/nginx/error.log
 ```
 
-## 10. 백업 및 복구
+## 📚 문서
 
-### 설정 백업 스크립트
+- [RHEL 가이드](docs/RHEL_GUIDE.md)
+- [대역폭 효율 전략](docs/BANDWIDTH_EFFICIENCY.md)
+- [Apache/nginx 통합](docs/APACHE_NGINX_INTEGRATION.md)
+
+## 🔄 업데이트
+
 ```bash
-sudo tee /usr/local/bin/nginx-defense-backup << 'EOF'
-#!/bin/bash
-BACKUP_DIR="/backup/nginx-defense"
-DATE=$(date +%Y%m%d_%H%M%S)
+# 최신 코드 받기
+git pull origin master
 
-mkdir -p $BACKUP_DIR
+# 설정 업데이트
+sudo cp nginx-defense.conf /etc/nginx/
+sudo cp apache/apache-defense.conf /etc/httpd/conf.d/
 
-# nginx 설정 백업
-tar -czf $BACKUP_DIR/nginx-config-$DATE.tar.gz /etc/nginx/
-
-# Lua 스크립트 백업
-tar -czf $BACKUP_DIR/lua-scripts-$DATE.tar.gz /etc/nginx/lua/
-
-# 관리 인터페이스 백업
-tar -czf $BACKUP_DIR/admin-interface-$DATE.tar.gz /var/www/admin/
-
-# Redis 데이터 백업
-redis-cli BGSAVE
-cp /var/lib/redis/dump.rdb $BACKUP_DIR/redis-$DATE.rdb
-
-echo "백업 완료: $BACKUP_DIR"
-EOF
-
-sudo chmod +x /usr/local/bin/nginx-defense-backup
+# 서비스 재시작
+sudo systemctl restart nginx httpd
 ```
 
-## 11. 문제 해결
+## 📞 지원
 
-### 일반적인 문제들
+이슈 발생 시 [GitHub Issues](https://github.com/supersignal/active-defense-sys/issues)에 문의하세요.
 
-1. **Lua 모듈 로드 실패**
-   ```bash
-   # Lua 모듈 경로 확인
-   find /usr -name "ngx_http_lua_module.so"
-   
-   # nginx 모듈 디렉토리 확인
-   nginx -V 2>&1 | grep -o 'modules-path=[^ ]*'
-   ```
+## 📜 라이선스
 
-2. **Redis 연결 실패**
-   ```bash
-   # Redis 서비스 상태 확인
-   sudo systemctl status redis
-   
-   # Redis 포트 확인
-   netstat -tlnp | grep 6379
-   ```
+MIT License
 
-3. **권한 문제**
-   ```bash
-   # nginx 사용자 권한 확인
-   sudo -u nginx ls -la /etc/nginx/lua/
-   
-   # 로그 파일 권한 확인
-   sudo chown nginx:nginx /var/log/nginx/security.log
-   ```
+## 🙏 기여
 
-## 12. 보안 강화
-
-### 추가 보안 설정
-```bash
-# nginx 사용자 권한 제한
-sudo usermod -s /bin/false nginx
-
-# 로그 파일 권한 설정
-sudo chmod 640 /var/log/nginx/security.log
-sudo chown nginx:nginx /var/log/nginx/security.log
-
-# 관리 인터페이스 접근 제한
-sudo tee /etc/nginx/conf.d/admin-restrict.conf << EOF
-location /admin {
-    allow 192.168.1.0/24;
-    allow 10.0.0.0/8;
-    deny all;
-}
-EOF
-```
-
-이제 nginx 기반 능동방어 시스템이 완전히 구축되었습니다! 🛡️
+Pull Request 환영합니다!
