@@ -49,6 +49,9 @@ analyze_repetitive_patterns() {
                 # IP 추출
                 ip = $1
                 
+                # 상태 코드 추출 (9번째 필드)
+                status = $9
+                
                 # URI 추출 (request 필드에서)
                 match($0, /"([^"]+)"/, request_match)
                 if (request_match[1]) {
@@ -57,13 +60,20 @@ analyze_repetitive_patterns() {
                     split(request, parts, " ")
                     uri = parts[2]
                     
-                    # IP + URI 조합
-                    key = ip "|" uri
+                    # IP + URI 조합 (302는 별도 처리)
+                    if (status == 302) {
+                        # 리다이렉트는 빠진 파라미터일 수 있음
+                        key = ip "|" uri "|302"
+                    } else {
+                        key = ip "|" uri
+                    }
+                    
                     count[key]++
                     
                     # 정보 저장
                     ip_info[key] = ip
                     uri_info[key] = uri
+                    status_info[key] = status
                 }
             }
         }
@@ -78,10 +88,18 @@ analyze_repetitive_patterns() {
                 found = 1
                 ip = ip_info[key]
                 uri = uri_info[key]
+                status = status_info[key]
+                
                 print "⚠️  IP: " ip
                 print "   URI: " uri
                 print "   호출 횟수: " count[key] " 회"
                 print "   초당 호출: " count[key] / 300 " req/s"
+                
+                # 302 리다이렉트가 많으면 파라미터 누락 공격 가능성
+                if (status == 302) {
+                    print "   🚨 302 리다이렉트 많이 발생 - 빠진 파라미터 공격 가능!"
+                }
+                
                 print ""
             }
         }
