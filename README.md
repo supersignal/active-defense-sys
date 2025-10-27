@@ -1,6 +1,7 @@
-# 🛡️ 능동방어 시스템 (RHEL 전용)
+# 🛡️ 능동방어 시스템
 
-Red Hat Enterprise Linux 기반 능동방어 시스템입니다.
+apache, nginx를 사용하는 web server에 DDOS 공격이 있을 떄
+우리 시스템을 보호하기 위한 능동방어 시스템입니다.
 
 ## 🚀 주요 기능
 
@@ -13,7 +14,7 @@ Red Hat Enterprise Linux 기반 능동방어 시스템입니다.
 
 ## 📋 시스템 요구사항
 
-- Red Hat Enterprise Linux 7/8/9
+- OS는 Red Hat Enterprise Linux 7/8/9
 - 최소 2GB RAM
 - 최소 10GB 디스크 공간
 - root 또는 sudo 권한
