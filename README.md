@@ -1,14 +1,15 @@
-# 🛡️ nginx/Apache 능동방어 시스템 (RHEL 전용)
+# 🛡️ 능동방어 시스템 (RHEL 전용)
 
 Red Hat Enterprise Linux 기반 능동방어 시스템입니다.
 
 ## 🚀 주요 기능
 
-- **대역폭 효율적 방어**: 444를 활용한 즉시 연결 종료
-- **이중 방어**: nginx + Apache 동시 지원
-- **RHEL 최적화**: Red Hat 특화 설정
-- **실시간 모니터링**: 위협 분석 및 로깅
-- **적응형 Rate Limiting**: IP 평판 기반
+- **Apache 또는 nginx 선택 가능**: 설치 시 웹서버 선택
+- **대역폭 효율적 방어**: 444를 활용한 즉시 연결 종료로 비용 절감
+- **화이트리스트 관리**: 정상 거래 IP 예외 처리 (예: 5000 TPS)
+- **동적 임계치 조정**: 실시간 보안 정책 변경
+- **웹 관리 인터페이스**: IP 차단/해제, 화이트리스트, 임계치 설정
+- **실시간 모니터링**: 보안 통계 및 공격 분석
 
 ## 📋 시스템 요구사항
 
@@ -31,69 +32,16 @@ sudo ./install.sh
 # 2) nginx (Lua 스크립트 기반)
 ```
 
-### 수동 설치
+설치 스크립트가 자동으로:
+- EPEL 저장소 활성화
+- 선택한 웹서버 설치
+- Redis 설치 및 설정
+- 능동방어 설정 적용
+- 방화벽 및 SELinux 설정
 
-```bash
-# EPEL 저장소 활성화
-sudo yum install -y epel-release
+## 🔧 설정
 
-# Apache 및 모듈 설치
-sudo yum install -y httpd mod_security mod_evasive mod_qos
-
-# nginx 설치
-sudo tee /etc/yum.repos.d/nginx.repo << 'EOF'
-[nginx]
-name=nginx repo
-baseurl=http://nginx.org/packages/rhel/$releasever/$basearch/
-gpgcheck=0
-enabled=1
-EOF
-
-sudo yum install -y nginx
-
-# Redis 설치
-sudo yum install -y redis
-sudo systemctl enable redis
-sudo systemctl start redis
-
-# 설정 파일 복사
-sudo cp apache/apache-defense.conf /etc/httpd/conf.d/
-sudo cp nginx-defense.conf /etc/nginx/
-
-# 서비스 시작
-sudo systemctl enable httpd nginx
-sudo systemctl start httpd nginx
-```
-
-## ⚙️ 설정
-
-### Apache 설정
-
-```bash
-# ModSecurity 활성화
-sudo vim /etc/httpd/conf.d/mod_security.conf
-
-# 능동방어 설정 확인
-sudo vim /etc/httpd/conf.d/defense-config.conf
-
-# Apache 재시작
-sudo systemctl restart httpd
-```
-
-### nginx 설정
-
-```bash
-# 메인 설정 확인
-sudo vim /etc/nginx/nginx-defense.conf
-
-# 능동방어 설정 확인
-sudo vim /etc/nginx/lua/defense.lua
-
-# nginx 재시작
-sudo systemctl restart nginx
-```
-
-## 🔥 방화벽 설정 (firewalld)
+### 방화벽 설정
 
 ```bash
 sudo firewall-cmd --permanent --add-service=http
@@ -101,51 +49,37 @@ sudo firewall-cmd --permanent --add-service=https
 sudo firewall-cmd --reload
 ```
 
-## 🔒 SELinux 설정
+### SELinux 설정
 
 ```bash
 sudo setsebool -P httpd_can_network_connect 1
 sudo setsebool -P httpd_can_network_relay 1
 ```
 
-## 📊 모니터링
+## 📊 관리 인터페이스
 
-### 실시간 로그
+웹 브라우저에서 접속:
 
-```bash
-# Apache 로그
-sudo tail -f /var/log/httpd/security.log
-
-# nginx 로그
-sudo tail -f /var/log/nginx/security.log
-
-# 통합 모니터링
-sudo /usr/local/bin/monitor-servers.sh
+```
+http://your-server:8080/admin
 ```
 
-### 통계 확인
+### 기능
 
-```bash
-# 차단된 IP 수
-sudo grep "blocked" /var/log/httpd/security.log | wc -l
-
-# 공격 시도 수
-sudo grep "attack" /var/log/nginx/security.log | wc -l
-```
+- **차단된 IP 관리**: 차단/해제, 차단 사유 확인
+- **화이트리스트**: 정상 거래 IP 등록 (5000 TPS 예외 처리)
+- **임계치 설정**: Rate Limiting, 위협 점수, DDOS 판단 기준 조정
+- **실시간 통계**: 총 요청 수, 차단 횟수, 활성 공격
+- **보안 로그**: 실시간 공격 시도 모니터링
 
 ## 🏗️ 아키텍처
 
-### 선택 가능한 웹서버
-
 ```
-설치 시 선택:
-1) Apache (mod_security 기반)
-2) nginx (Lua 스크립트 기반)
-
 ┌─────────────────────────────────┐
 │     선택된 웹서버 (둘 중 하나)   │
 │  ┌─────────┐   또는   ┌───────┐ │
 │  │ Apache  │          │nginx │ │
+│  │(mod_sec)│          │(Lua) │ │
 │  └────┬────┘          └───┬───┘ │
 │       │                  │     │
 │  ┌────▼──────────────────▼───┐  │
@@ -154,7 +88,7 @@ sudo grep "attack" /var/log/nginx/security.log | wc -l
 │  └─────────┬────────────────┘  │
 │            │                   │
 │       ┌────▼───────────┐       │
-│       │  백엔드 서버    │       │
+│       │  Redis Cache   │       │
 │       └────────────────┘       │
 └─────────────────────────────────┘
 ```
@@ -163,47 +97,42 @@ sudo grep "attack" /var/log/nginx/security.log | wc -l
 
 ```
 active-defense-sys/
-├── install-rhel.sh              # RHEL 설치 스크립트
-├── nginx-defense.conf            # nginx 설정
+├── install.sh                  # 통합 설치 스크립트
+├── nginx-defense.conf          # nginx 설정
+├── admin/
+│   └── index.html              # 웹 관리 인터페이스
 ├── apache/
-│   ├── apache-defense.conf      # Apache 설정
-│   └── setup-apache-defense.sh  # Apache 설치
-├── lua/                          # Lua 스크립트
-│   ├── defense.lua              # 기본 방어
+│   ├── apache-defense.conf     # Apache 설정
+│   └── setup-apache-defense.sh # Apache 설치
+├── lua/                        # nginx Lua 스크립트
+│   ├── defense.lua             # 기본 방어
 │   └── advanced_defense.lua    # 고급 전략
-├── scripts/                      # 유틸리티
-│   ├── automation.sh            # 자동화
-│   └── log_analyzer.sh          # 로그 분석
-└── docs/                         # 문서
-    ├── RHEL_GUIDE.md            # RHEL 가이드
-    └── BANDWIDTH_EFFICIENCY.md  # 대역폭 전략
+├── common/                     # 공통 로직
+│   └── threat_detection.lua    # 위협 감지
+├── api/                        # API 엔드포인트
+│   └── admin_api_server.lua    # 관리 API
+└── scripts/                    # 유틸리티
+    ├── automation.sh           # 자동화
+    └── log_analyzer.sh         # 로그 분석
 ```
 
 ## 🛡️ 방어 전략
 
-### 1. 444 사용 (대역폭 소비 제로)
-```nginx
-ngx.status = 444
-ngx.exit(444)
-```
+### 1. 대역폭 효율적 차단 (444)
+
+HTTP 응답 없이 즉시 연결 종료 → 대역폭 소비 제로
 
 ### 2. 타임아웃 전략
-```nginx
-ngx.sleep(10)  # 공격자 리소스 소모
-ngx.status = 503
-```
+
+공격자를 대기시켜 리소스 소모
 
 ### 3. Honey Token
-```nginx
-# 가짜 취약 페이지 제공
-ngx.say('<html>Fake Login</html>')
-```
+
+가짜 취약 페이지 제공으로 공격 정보 수집
 
 ### 4. Shadow Ban
-```nginx
-ngx.sleep(60)  # 계속 대기시키기
-ngx.status = 504
-```
+
+차단 사실을 숨겨 계속 요청 유도
 
 ## 📈 성능 비교
 
@@ -234,38 +163,29 @@ sudo kill -9 <PID>
 
 ### 로그 확인
 ```bash
-sudo tail -f /var/log/httpd/error_log
-sudo tail -f /var/log/nginx/error.log
+# Apache
+sudo tail -f /var/log/httpd/security.log
+
+# nginx
+sudo tail -f /var/log/nginx/security.log
 ```
 
 ## 📚 문서
 
 - [RHEL 가이드](docs/RHEL_GUIDE.md)
 - [대역폭 효율 전략](docs/BANDWIDTH_EFFICIENCY.md)
-- [Apache/nginx 통합](docs/APACHE_NGINX_INTEGRATION.md)
 
 ## 🔄 업데이트
 
 ```bash
-# 최신 코드 받기
 git pull origin master
-
-# 설정 업데이트
-sudo cp nginx-defense.conf /etc/nginx/
-sudo cp apache/apache-defense.conf /etc/httpd/conf.d/
-
-# 서비스 재시작
 sudo systemctl restart nginx httpd
 ```
 
 ## 📞 지원
 
-이슈 발생 시 [GitHub Issues](https://github.com/supersignal/active-defense-sys/issues)에 문의하세요.
+[GitHub Issues](https://github.com/supersignal/active-defense-sys/issues)
 
 ## 📜 라이선스
 
 MIT License
-
-## 🙏 기여
-
-Pull Request 환영합니다!
