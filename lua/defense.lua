@@ -1,13 +1,15 @@
--- nginx 능동방어 시스템 메인 Lua 스크립트
+-- nginx 능동방어 시스템 메인 Lua 스크립트 (개선됨)
+-- 대역폭 효율적 능동방어
 local json = require "cjson"
 local redis = require "resty.redis"
 
 local _M = {}
+local advanced = require "advanced_defense"
 
 -- Redis 연결 설정
 local function get_redis()
     local red = redis:new()
-    red:set_timeouts(1000, 1000, 1000)
+    red:set_timeouts(100, 100, 100) -- 짧은 타임아웃으로 빠른 처리
     local ok, err = red:connect("127.0.0.1", 6379)
     if not ok then
         ngx.log(ngx.ERR, "Redis 연결 실패: ", err)
@@ -65,35 +67,34 @@ local function block_ip(ip, reason)
     ngx.log(ngx.WARN, "IP 차단: " .. ip .. " - 이유: " .. reason)
 end
 
--- 요청 검증
+-- 요청 검증 (개선됨 - 대역폭 효율적)
 function _M.check_request()
     local client_ip = ngx.var.remote_addr
     local uri = ngx.var.request_uri or ""
     local method = ngx.var.request_method or ""
     local user_agent = ngx.var.http_user_agent or ""
     
-    -- 이미 차단된 IP인지 확인
+    -- 이미 차단된 IP인지 확인 (444로 즉시 종료)
     if is_ip_blocked(client_ip) then
         ngx.var.blocked = "1"
         ngx.var.block_reason = "blocked_ip"
         ngx.var.threat_level = "high"
-        ngx.status = 403
-        ngx.say("Access Denied")
-        ngx.exit(403)
+        ngx.status = 444 -- 대역폭 소비 제로
+        ngx.exit(444)
     end
     
     -- 위험도 점수 계산
     local threat_score = calculate_threat_score(client_ip)
     
-    -- 위험도에 따른 처리
+    -- 위험도에 따른 처리 (대역폭 효율적)
     if threat_score > 80 then
         block_ip(client_ip, "high_threat_score")
         ngx.var.blocked = "1"
         ngx.var.block_reason = "high_threat"
         ngx.var.threat_level = "critical"
-        ngx.status = 403
-        ngx.say("Access Denied")
-        ngx.exit(403)
+        -- 444 사용으로 대역폭 소비 제로
+        ngx.status = 444
+        ngx.exit(444)
     elseif threat_score > 50 then
         ngx.var.threat_level = "high"
         -- Rate limiting 강화
@@ -105,15 +106,14 @@ function _M.check_request()
         ngx.var.threat_level = "low"
     end
     
-    -- 특정 공격 패턴 감지
+    -- 특정 공격 패턴 감지 (444 사용)
     if string.match(uri, "\.php$") and method == "GET" then
         block_ip(client_ip, "php_scanning")
         ngx.var.blocked = "1"
         ngx.var.block_reason = "php_scanning"
         ngx.var.threat_level = "critical"
-        ngx.status = 403
-        ngx.say("Access Denied")
-        ngx.exit(403)
+        ngx.status = 444 -- 즉시 연결 종료
+        ngx.exit(444)
     end
     
     -- Bot 감지
